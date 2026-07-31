@@ -17,6 +17,12 @@ const config = {
   token: getEnv("DISCORD_TOKEN"),
   clientId: getEnv("CLIENT_ID"),
   guildId: getEnv("GUILD_ID", false),
+  startupSplashingContestChannelId: getEnv(
+    "STARTUP_SPLASHING_CONTEST_CHANNEL_ID",
+    false
+  ),
+  backendBaseUrl: getEnv("BACKEND_BASE_URL"),
+  storePath: getEnv("BOT_STORE_PATH", false),
 };
 
 module.exports = config;

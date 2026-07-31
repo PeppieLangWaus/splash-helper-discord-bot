@@ -1,4 +1,8 @@
-const { EmbedBuilder, SlashCommandBuilder } = require("discord.js");
+const { EmbedBuilder, MessageFlags, SlashCommandBuilder } = require("discord.js");
+const displayComponents = require("./display-components");
+const embedComponents = require("./embed-components");
+const setupCommand = require("./commands/setup");
+const linkCommand = require("./commands/link");
 
 function parseHexColor(raw) {
   if (!raw) {
@@ -70,6 +74,15 @@ function parseEmbedJson(rawText) {
   }
 
   return EmbedBuilder.from(candidate);
+}
+
+function findTemplate(templates, name) {
+  if (!name) {
+    return templates[0];
+  }
+
+  const normalized = name.trim().toLowerCase();
+  return templates.find((template) => template.name.toLowerCase() === normalized);
 }
 
 const commands = [
@@ -197,6 +210,65 @@ const commands = [
       });
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName("display-test")
+      .setDescription("Display a test display component template")
+      .addStringOption((option) =>
+        option
+          .setName("name")
+          .setDescription("Display component name (defaults to the first template)")
+          .setRequired(false)
+      ),
+    async execute(interaction) {
+      const selectedName = interaction.options.getString("name");
+      const component = findTemplate(displayComponents, selectedName);
+
+      if (!component) {
+        const validNames = displayComponents.map((entry) => entry.name).join(", ");
+        await interaction.reply({
+          content: `Unknown display component \"${selectedName}\". Available: ${validNames}`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const container = component.buildComponent();
+      await interaction.reply({
+        components: [container],
+        flags: MessageFlags.IsComponentsV2,
+      });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName("embed-test")
+      .setDescription("Display a test embed template")
+      .addStringOption((option) =>
+        option
+          .setName("name")
+          .setDescription("Embed template name (defaults to the first template)")
+          .setRequired(false)
+      ),
+    async execute(interaction) {
+      const selectedName = interaction.options.getString("name");
+      const template = findTemplate(embedComponents, selectedName);
+
+      if (!template) {
+        const validNames = embedComponents.map((entry) => entry.name).join(", ");
+        await interaction.reply({
+          content: `Unknown embed template \"${selectedName}\". Available: ${validNames}`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const embed = template.buildEmbed();
+      await interaction.reply({ embeds: [embed] });
+    },
+  },
+  setupCommand,
+  linkCommand,
 ];
 
 module.exports = commands;
