@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
     "register-commands": "node src/register-commands.js",
     "test": "echo \"No automated tests configured\""
   },
@@ -28,5 +29,8 @@
   "dependencies": {
     "discord.js": "^14.26.4",
     "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
   }
 }

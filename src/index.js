@@ -1,18 +1,19 @@
-const {
-  Client,
-  Collection,
-  Events,
-  GatewayIntentBits,
-  MessageFlags,
-} = require("discord.js");
+const { Client, Collection, Events, GatewayIntentBits } = require("discord.js");
 const config = require("./config");
 const commands = require("./commands");
-const displayComponents = require("./display-components");
 const setupWizard = require("./setupWizard");
 const tickets = require("./tickets");
+const bankTickets = require("./bankTickets");
+const linkCommand = require("./commands/link");
 const { startApplicationPoller } = require("./applicationPoller");
+const { startActiveWorldsPoster } = require("./activeWorldsPoster");
+const { startSessionHistoryPoster } = require("./sessionHistoryPoster");
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// GuildMessages (non-privileged) is needed so awaitMessages collectors (used to collect
+// deposit/withdraw/payout screenshots) can see MessageCreate events at all. Message content
+// itself is read only from replies to the bot's own prompt messages, one of Discord's
+// documented exceptions delivered without the privileged Message Content intent.
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 client.commands = new Collection();
 
 for (const command of commands) {
@@ -22,48 +23,9 @@ for (const command of commands) {
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
 
-  const channelId = config.startupSplashingContestChannelId;
-  if (!channelId) {
-    console.log(
-      "Startup splashing contest post skipped: STARTUP_SPLASHING_CONTEST_CHANNEL_ID is not set."
-    );
-    return;
-  }
-
-  const template = displayComponents.find(
-    (entry) => entry.name === "splashing-contest"
-  );
-
-  if (!template) {
-    console.warn(
-      "Startup splashing contest post skipped: template 'splashing-contest' not found."
-    );
-    return;
-  }
-
-  try {
-    const channel = await readyClient.channels.fetch(channelId);
-    if (!channel || !channel.isTextBased()) {
-      console.warn(
-        `Startup splashing contest post skipped: channel ${channelId} is missing or not text-based.`
-      );
-      return;
-    }
-
-    const container = template.buildComponent();
-    await channel.send({
-      components: [container],
-      flags: MessageFlags.IsComponentsV2,
-    });
-
-    console.log(
-      `Posted startup splashing contest message to channel ${channelId}.`
-    );
-  } catch (error) {
-    console.error("Failed to post startup splashing contest message:", error);
-  }
-
   startApplicationPoller(readyClient);
+  startActiveWorldsPoster(readyClient);
+  startSessionHistoryPoster(readyClient);
 });
 
 async function replyWithError(interaction, message) {
@@ -99,6 +61,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     if (customId.startsWith("ticket:")) {
       await tickets.handleResolveButton(interaction);
+      return;
+    }
+    if (customId.startsWith("bank:")) {
+      await bankTickets.handleInteraction(interaction);
+      return;
+    }
+    if (customId === "link:modal" && interaction.isModalSubmit()) {
+      await linkCommand.handleModalSubmit(interaction);
       return;
     }
   } catch (error) {

@@ -1,19 +1,14 @@
-const { SlashCommandBuilder, ChannelType } = require("discord.js");
+const {
+  SlashCommandBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  ActionRowBuilder,
+  ChannelType,
+} = require("discord.js");
 const store = require("../store");
 const backendApi = require("../backendApi");
 const { buildResolveButtons } = require("../tickets");
-
-const REPLY_TIMEOUT_MS = 5 * 60 * 1000;
-
-async function collectReply(thread, userId) {
-  const collected = await thread.awaitMessages({
-    filter: (m) => m.author.id === userId,
-    max: 1,
-    time: REPLY_TIMEOUT_MS,
-  });
-  const message = collected.first();
-  return message ? message.content.trim() : null;
-}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -29,75 +24,102 @@ module.exports = {
       return;
     }
 
-    const parentChannel = guildConfig.splasherLinkChannelId
-      ? await interaction.guild.channels.fetch(guildConfig.splasherLinkChannelId).catch(() => null)
-      : null;
-    if (!parentChannel || !parentChannel.isTextBased()) {
+    const modal = new ModalBuilder()
+      .setCustomId("link:modal")
+      .setTitle("Link Splash Helper Account")
+      .addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId("pluginToken")
+            .setLabel("Plugin sync token (Account Settings)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true),
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId("rsn")
+            .setLabel("RSN (in-game username)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true),
+        ),
+      );
+
+    await interaction.showModal(modal);
+  },
+
+  async handleModalSubmit(interaction) {
+    const guildConfig = store.getGuild(interaction.guildId);
+    if (!guildConfig) {
       await interaction.reply({
-        content: "The splasher-link channel isn't configured correctly — ask an admin to rerun /setup.",
+        content: "This server hasn't run /setup yet — ask a server admin to set it up first.",
         ephemeral: true,
       });
       return;
     }
 
-    await interaction.reply({ content: "Opening a private thread to verify your account…", ephemeral: true });
-
-    const thread = await parentChannel.threads.create({
-      name: `link-${interaction.user.username}`.slice(0, 90),
-      type: ChannelType.PrivateThread,
-      reason: `Account link request from ${interaction.user.tag}`,
-    });
-    await thread.members.add(interaction.user.id).catch(() => {});
-
-    await thread.send(
-      `${interaction.user}, please reply with your **plugin sync token** (found in Account Settings on the website).`,
-    );
-    const token = await collectReply(thread, interaction.user.id);
-    if (!token) {
-      await thread.send("Timed out waiting for a reply — run /link again to retry.");
-      await thread.setArchived(true).catch(() => {});
-      return;
-    }
-
-    await thread.send("Now reply with your **RSN** (in-game username).");
-    const rsn = await collectReply(thread, interaction.user.id);
-    if (!rsn) {
-      await thread.send("Timed out waiting for a reply — run /link again to retry.");
-      await thread.setArchived(true).catch(() => {});
-      return;
-    }
+    const pluginToken = interaction.fields.getTextInputValue("pluginToken").trim();
+    const rsn = interaction.fields.getTextInputValue("rsn").trim();
 
     let result;
     try {
-      result = await backendApi.linkAccount(guildConfig.apiToken, { pluginToken: token, rsn });
+      result = await backendApi.linkAccount(guildConfig.apiToken, {
+        pluginToken,
+        rsn,
+        discordUserId: interaction.user.id,
+      });
     } catch (error) {
-      await thread.send("Something went wrong verifying your account — ask an admin for help.");
+      await interaction.reply({
+        content: "Something went wrong verifying your account — ask an admin for help.",
+        ephemeral: true,
+      });
       return;
     }
 
     if (!result.matched) {
-      await thread.send(
-        "No account found matching that token and RSN. Double-check both on the website and run /link again.",
-      );
-      await thread.setArchived(true).catch(() => {});
+      await interaction.reply({
+        content:
+          "No account found matching that token and RSN. Double-check both on the website and run /link again.",
+        ephemeral: true,
+      });
       return;
     }
 
     if (result.status === "added") {
-      await thread.send(`✅ You're linked and added as a splasher for **${result.communityName}**!`);
-      await thread.setArchived(true).catch(() => {});
+      await interaction.reply({
+        content: `✅ You're linked and added as a splasher for **${result.communityName}**!`,
+        ephemeral: true,
+      });
       return;
     }
 
     const { config: discordConfig } = await backendApi
       .getDiscordConfig(guildConfig.apiToken)
       .catch(() => ({ config: null }));
-    const supportRoleMentions = (discordConfig?.supportRoleIds ?? []).map((id) => `<@&${id}>`).join(" ");
-    await thread.send({
-      content:
-        `Account verified — waiting on staff approval to join **${result.communityName}**.` +
-        (supportRoleMentions ? ` ${supportRoleMentions}` : ""),
-      components: [buildResolveButtons(result.applicationId)],
+
+    const parentChannel = discordConfig?.splasherLinkChannelId
+      ? await interaction.guild.channels.fetch(discordConfig.splasherLinkChannelId).catch(() => null)
+      : null;
+
+    if (parentChannel?.isTextBased()) {
+      const thread = await parentChannel.threads.create({
+        name: `link-${interaction.user.username}`.slice(0, 90),
+        type: ChannelType.PrivateThread,
+        reason: `Account link request from ${interaction.user.tag}`,
+      });
+      await thread.members.add(interaction.user.id).catch(() => {});
+
+      const supportRoleMentions = (discordConfig?.supportRoleIds ?? []).map((id) => `<@&${id}>`).join(" ");
+      await thread.send({
+        content:
+          `${interaction.user} verified their account — waiting on staff approval to join **${result.communityName}**.` +
+          (supportRoleMentions ? ` ${supportRoleMentions}` : ""),
+        components: [buildResolveButtons(result.applicationId)],
+      });
+    }
+
+    await interaction.reply({
+      content: `Account verified — waiting on staff approval to join **${result.communityName}**.`,
+      ephemeral: true,
     });
   },
 };

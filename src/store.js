@@ -31,9 +31,23 @@ function getGuild(guildId) {
   return readAll()[guildId] ?? null;
 }
 
+// Merges rather than overwrites, so re-running /setup (which only ever supplies
+// communityId/apiToken) doesn't wipe poller state like activeWorldsMessageId or
+// lastHistorySyncAt that other parts of the bot have since patched onto this guild.
 function setGuild(guildId, { communityId, apiToken }) {
   const all = readAll();
-  all[guildId] = { communityId, apiToken, updatedAt: new Date().toISOString() };
+  const existing = all[guildId] ?? {};
+  all[guildId] = { ...existing, communityId, apiToken, updatedAt: new Date().toISOString() };
+  writeAll(all);
+}
+
+/** Merges an arbitrary partial patch into a guild's stored state — used by the active-worlds
+ *  and session-history pollers to persist their own small bits of state (message ids, sync
+ *  cursors) alongside the communityId/apiToken set by /setup. */
+function patchGuild(guildId, patch) {
+  const all = readAll();
+  const existing = all[guildId] ?? {};
+  all[guildId] = { ...existing, ...patch, updatedAt: new Date().toISOString() };
   writeAll(all);
 }
 
@@ -41,4 +55,4 @@ function allGuilds() {
   return readAll();
 }
 
-module.exports = { getGuild, setGuild, allGuilds };
+module.exports = { getGuild, setGuild, patchGuild, allGuilds };

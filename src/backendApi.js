@@ -54,11 +54,48 @@ function resolveApplication(token, applicationId, approve) {
   });
 }
 
-function linkAccount(token, { pluginToken, rsn }) {
+function linkAccount(token, { pluginToken, rsn, discordUserId }) {
   return request("/community-bot/link-account", {
     method: "POST",
     token,
-    body: { token: pluginToken, rsn },
+    body: { token: pluginToken, rsn, discordUserId },
+  });
+}
+
+function getActiveSessions(token) {
+  return request("/community-bot/active-sessions", { token });
+}
+
+function getSessionHistory(token, since) {
+  const query = since ? `?since=${since}` : "";
+  return request(`/community-bot/sessions/history${query}`, { token });
+}
+
+function getIncome(token, discordUserId) {
+  return request(`/community-bot/income?discordUserId=${encodeURIComponent(discordUserId)}`, { token });
+}
+
+function requestPayout(token, discordUserId) {
+  return request("/community-bot/income/payout", { method: "POST", token, body: { discordUserId } });
+}
+
+function getBank(token) {
+  return request("/community-bot/bank", { token });
+}
+
+function createBankTicket(token, { type, amountGp, discordUserId, discordUsername }) {
+  return request("/community-bot/bank/tickets", {
+    method: "POST",
+    token,
+    body: { type, amountGp, discordUserId, discordUsername },
+  });
+}
+
+function resolveBankTicket(token, ticketId, { approve, screenshotUrl, authorizedByDiscordId, authorizedByUsername }) {
+  return request(`/community-bot/bank/tickets/${ticketId}/resolve`, {
+    method: "POST",
+    token,
+    body: { approve, screenshotUrl, authorizedByDiscordId, authorizedByUsername },
   });
 }
 
@@ -69,4 +106,11 @@ module.exports = {
   getPendingApplications,
   resolveApplication,
   linkAccount,
+  getActiveSessions,
+  getSessionHistory,
+  getIncome,
+  requestPayout,
+  getBank,
+  createBankTicket,
+  resolveBankTicket,
 };

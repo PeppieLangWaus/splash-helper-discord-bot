@@ -3,6 +3,8 @@ const displayComponents = require("./display-components");
 const embedComponents = require("./embed-components");
 const setupCommand = require("./commands/setup");
 const linkCommand = require("./commands/link");
+const incomeCommand = require("./commands/income");
+const bankCommand = require("./commands/bank");
 
 function parseHexColor(raw) {
   if (!raw) {
@@ -269,6 +271,8 @@ const commands = [
   },
   setupCommand,
   linkCommand,
+  incomeCommand,
+  bankCommand,
 ];
 
 module.exports = commands;

@@ -14,6 +14,10 @@ tickets) and for viewing/testing embed messages.
   Approve/Reject buttons for staff.
 - Website-submitted splasher applications are picked up automatically (polling every 60s) and
   posted as tickets in the support ticket channel with the same Approve/Reject buttons.
+- Active worlds channel: a single component-based message listing the community's currently
+  active splash sessions, kept up to date in place (edited every ~20s, never duplicated).
+- History channel: one component-based message per splash session as soon as it's finalized
+  (polled every ~30s).
 - `/embed-preview`: Build an embed from slash-command options
 - `/embed-json`: Preview an embed directly from a JSON payload
 - `/embed-help`: Quick usage examples
@@ -32,6 +36,12 @@ else (channel IDs, support roles, auto-add setting, pending applications) lives 
 `splash-helper-backend` under the community, fetched/written via the community's own API token
 through the `/community-bot/*` routes. See `src/backendApi.js`, `src/store.js`,
 `src/setupWizard.js`, and `src/tickets.js`.
+
+The active-worlds and history channel posters (`src/activeWorldsPoster.js`,
+`src/sessionHistoryPoster.js`) each poll `/community-bot/active-sessions` and
+`/community-bot/sessions/history` per guild. The only extra state they keep locally (in the
+same per-guild store) is the active-worlds message id (so it's edited in place instead of
+duplicated) and a `since` cursor for history (so a session is only posted once).
 
 ## Prerequisites
 
@@ -57,7 +67,6 @@ through the `/community-bot/*` routes. See `src/backendApi.js`, `src/store.js`,
    - `DISCORD_TOKEN`: Bot token from Discord Developer Portal
    - `CLIENT_ID`: Application (bot) client ID
    - `GUILD_ID`: Test server ID (recommended for instant command updates)
-   - `STARTUP_SPLASHING_CONTEST_CHANNEL_ID`: Optional text channel ID to auto-post the `splashing-contest` display component when the bot starts
    - `BACKEND_BASE_URL`: Base URL of `splash-helper-backend` (e.g. `http://localhost:3000`)
    - `BOT_STORE_PATH`: Optional path for the per-guild community/token store (defaults to `./data/guilds.json`)
 
