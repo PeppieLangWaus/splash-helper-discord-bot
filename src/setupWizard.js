@@ -32,12 +32,12 @@ const STEPS = [
     key: "supportRoleIds",
     prompt: "Which roles should be pinged for support tickets? (select up to 5)",
   },
-  { type: "channel", key: "supportTicketChannelId", label: "support ticket channel" },
+  { type: "channel", key: "supportTicketChannelId", label: "SH-support" },
   { type: "autoadd" },
-  { type: "channel", key: "splasherLinkChannelId", label: "splasher-link ticket channel" },
-  { type: "channel", key: "historyChannelId", label: "splasher history channel" },
-  { type: "channel", key: "activeWorldsChannelId", label: "active worlds channel" },
-  { type: "channel", key: "bankChannelId", label: "bank channel" },
+  { type: "channel", key: "splasherLinkChannelId", label: "SH-splasher-link" },
+  { type: "channel", key: "historyChannelId", label: "splasher-logs" },
+  { type: "channel", key: "activeWorldsChannelId", label: "Worlds" },
+  { type: "bank-channel", key: "bankChannelId", label: "Bank" },
   {
     type: "roles",
     key: "bankManagerRoleIds",
@@ -70,6 +70,22 @@ function renderAutoAdd() {
           .setCustomId("setup:autoadd:false")
           .setLabel("Require staff approval")
           .setStyle(ButtonStyle.Secondary),
+      ),
+    ],
+  };
+}
+
+function renderBankVisibilityChoice(stepIndex) {
+  return {
+    content:
+      "Should the **bank channel** be public or private?\n" +
+      "**Public** — everyone can see the channel and its threads, but only bank managers can post or react in it.\n" +
+      "**Private** — only roles you choose can see the channel at all.",
+    embeds: [],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`setup:bankvis:${stepIndex}:public`).setLabel("Public").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`setup:bankvis:${stepIndex}:private`).setLabel("Private").setStyle(ButtonStyle.Secondary),
       ),
     ],
   };
@@ -151,6 +167,7 @@ function renderStep(stepIndex) {
   if (step.type === "roles") return renderRoles(step);
   if (step.type === "autoadd") return renderAutoAdd();
   if (step.type === "payout-min") return renderPayoutMin();
+  if (step.type === "bank-channel") return renderBankVisibilityChoice(stepIndex);
   return renderChannelChoice(stepIndex, step.label);
 }
 
@@ -160,6 +177,31 @@ function buildChannelPermissionOverwrites(guild, roleIds) {
     { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
     ...roleIds.map((roleId) => ({ id: roleId, allow: [PermissionFlagsBits.ViewChannel] })),
   ];
+}
+
+// Read-only for @everyone: can view the channel and its threads, but can't post, react, or
+// start new threads. Two shapes are needed because channel creation and permissionOverwrites.edit
+// take different overwrite formats.
+const BANK_PUBLIC_ALLOW = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory];
+const BANK_PUBLIC_DENY = [
+  PermissionFlagsBits.SendMessages,
+  PermissionFlagsBits.SendMessagesInThreads,
+  PermissionFlagsBits.CreatePublicThreads,
+  PermissionFlagsBits.CreatePrivateThreads,
+  PermissionFlagsBits.AddReactions,
+];
+const BANK_PUBLIC_EDIT_PERMS = {
+  ViewChannel: true,
+  ReadMessageHistory: true,
+  SendMessages: false,
+  SendMessagesInThreads: false,
+  CreatePublicThreads: false,
+  CreatePrivateThreads: false,
+  AddReactions: false,
+};
+
+function buildBankPublicPermissionOverwrites(guild) {
+  return [{ id: guild.roles.everyone.id, allow: BANK_PUBLIC_ALLOW, deny: BANK_PUBLIC_DENY }];
 }
 
 function channelName(label) {
@@ -212,7 +254,10 @@ async function finishSetup(interaction, state) {
       { name: "Splasher-link channel", value: `<#${discordConfig.splasherLinkChannelId}>` },
       { name: "History channel", value: `<#${discordConfig.historyChannelId}>` },
       { name: "Active worlds channel", value: `<#${discordConfig.activeWorldsChannelId}>` },
-      { name: "Bank channel", value: `<#${discordConfig.bankChannelId}>` },
+      {
+        name: "Bank channel",
+        value: `<#${discordConfig.bankChannelId}> (${state.collected.bankChannelPublic ? "public — read-only for everyone" : "private"})`,
+      },
       {
         name: "Bank managers",
         value: discordConfig.bankManagerRoleIds.length
@@ -324,19 +369,45 @@ async function handleInteraction(interaction) {
     return true;
   }
 
+  const bankVisMatch = customId.match(/^setup:bankvis:(\d+):(public|private)$/);
+  if (bankVisMatch && interaction.isButton()) {
+    const stepIndex = Number(bankVisMatch[1]);
+    const step = STEPS[stepIndex];
+    if (!step) return true;
+    state.collected.bankChannelPublic = bankVisMatch[2] === "public";
+    await interaction.update(renderChannelChoice(stepIndex, step.label));
+    return true;
+  }
+
   const channelMatch = customId.match(/^setup:ch:(\d+):(create|choose|select|vis-select|vis-skip)$/);
   if (channelMatch) {
     const stepIndex = Number(channelMatch[1]);
     const action = channelMatch[2];
     const step = STEPS[stepIndex];
     if (!step) return true;
+    const bankIsPublic = step.type === "bank-channel" && state.collected.bankChannelPublic;
 
     if (action === "create" && interaction.isButton()) {
-      await interaction.update(renderChannelVisibility(stepIndex, step.label));
+      if (bankIsPublic) {
+        const channel = await interaction.guild.channels.create({
+          name: channelName(step.label),
+          type: ChannelType.GuildText,
+          permissionOverwrites: buildBankPublicPermissionOverwrites(interaction.guild),
+        });
+        state.collected[step.key] = channel.id;
+        await goToStep(interaction, state, stepIndex + 1);
+      } else {
+        await interaction.update(renderChannelVisibility(stepIndex, step.label));
+      }
     } else if (action === "choose" && interaction.isButton()) {
       await interaction.update(renderChannelSelect(stepIndex, step.label));
     } else if (action === "select" && interaction.isChannelSelectMenu()) {
-      state.collected[step.key] = interaction.values[0];
+      const channelId = interaction.values[0];
+      if (bankIsPublic) {
+        const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+        await channel?.permissionOverwrites.edit(interaction.guild.roles.everyone, BANK_PUBLIC_EDIT_PERMS).catch(() => {});
+      }
+      state.collected[step.key] = channelId;
       await goToStep(interaction, state, stepIndex + 1);
     } else if (action === "vis-select" && interaction.isRoleSelectMenu()) {
       const channel = await interaction.guild.channels.create({

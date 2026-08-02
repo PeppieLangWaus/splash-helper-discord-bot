@@ -1,14 +1,8 @@
-const {
-  SlashCommandBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  ActionRowBuilder,
-  ChannelType,
-} = require("discord.js");
+const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require("discord.js");
 const store = require("../store");
 const backendApi = require("../backendApi");
 const { buildResolveButtons } = require("../tickets");
+const { postBankLogMessage } = require("../bankTickets");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -60,6 +54,20 @@ module.exports = {
     const pluginToken = interaction.fields.getTextInputValue("pluginToken").trim();
     const rsn = interaction.fields.getTextInputValue("rsn").trim();
 
+    const { config: discordConfig } = await backendApi
+      .getDiscordConfig(guildConfig.apiToken)
+      .catch(() => ({ config: null }));
+
+    const parentChannel = discordConfig?.splasherLinkChannelId
+      ? await interaction.guild.channels.fetch(discordConfig.splasherLinkChannelId).catch(() => null)
+      : null;
+
+    const ts = Math.floor(Date.now() / 1000);
+    const logAttempt = (content) =>
+      parentChannel?.isTextBased()
+        ? postBankLogMessage(parentChannel, content, `link-${interaction.user.username}`).catch(() => null)
+        : Promise.resolve(null);
+
     let result;
     try {
       result = await backendApi.linkAccount(guildConfig.apiToken, {
@@ -68,6 +76,7 @@ module.exports = {
         discordUserId: interaction.user.id,
       });
     } catch (error) {
+      await logAttempt(`<t:${ts}:f> - ${interaction.user} tried to \`/link\` (RSN: ${rsn}) but verification failed.`);
       await interaction.reply({
         content: "Something went wrong verifying your account — ask an admin for help.",
         ephemeral: true,
@@ -76,6 +85,9 @@ module.exports = {
     }
 
     if (!result.matched) {
+      await logAttempt(
+        `<t:${ts}:f> - ${interaction.user} tried to \`/link\` with RSN **${rsn}** but no matching account was found.`,
+      );
       await interaction.reply({
         content:
           "No account found matching that token and RSN. Double-check both on the website and run /link again.",
@@ -85,6 +97,9 @@ module.exports = {
     }
 
     if (result.status === "added") {
+      await logAttempt(
+        `<t:${ts}:f> - ${interaction.user} linked and was auto-added as a splasher for **${result.communityName}**.`,
+      );
       await interaction.reply({
         content: `✅ You're linked and added as a splasher for **${result.communityName}**!`,
         ephemeral: true,
@@ -92,20 +107,12 @@ module.exports = {
       return;
     }
 
-    const { config: discordConfig } = await backendApi
-      .getDiscordConfig(guildConfig.apiToken)
-      .catch(() => ({ config: null }));
+    const logged = await logAttempt(
+      `<t:${ts}:f> - ${interaction.user} linked and requested to join as a splasher for **${result.communityName}**.`,
+    );
 
-    const parentChannel = discordConfig?.splasherLinkChannelId
-      ? await interaction.guild.channels.fetch(discordConfig.splasherLinkChannelId).catch(() => null)
-      : null;
-
-    if (parentChannel?.isTextBased()) {
-      const thread = await parentChannel.threads.create({
-        name: `link-${interaction.user.username}`.slice(0, 90),
-        type: ChannelType.PrivateThread,
-        reason: `Account link request from ${interaction.user.tag}`,
-      });
+    if (logged) {
+      const { thread } = logged;
       await thread.members.add(interaction.user.id).catch(() => {});
 
       const supportRoleMentions = (discordConfig?.supportRoleIds ?? []).map((id) => `<@&${id}>`).join(" ");

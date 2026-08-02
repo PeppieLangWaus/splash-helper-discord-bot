@@ -16,7 +16,8 @@ tickets) and for viewing/testing embed messages.
   posted as tickets in the support ticket channel with the same Approve/Reject buttons.
 - Active worlds channel: a single component-based message listing the community's currently
   active splash sessions, kept up to date in place (edited every ~20s, never duplicated).
-- History channel: one component-based message per splash session as soon as it's finalized
+- History channel: a thread per linked splasher (created on first session, reused after), with
+  one component-based message posted to that splasher's thread as soon as a session is finalized
   (polled every ~30s).
 - `/embed-preview`: Build an embed from slash-command options
 - `/embed-json`: Preview an embed directly from a JSON payload
@@ -41,7 +42,9 @@ The active-worlds and history channel posters (`src/activeWorldsPoster.js`,
 `src/sessionHistoryPoster.js`) each poll `/community-bot/active-sessions` and
 `/community-bot/sessions/history` per guild. The only extra state they keep locally (in the
 same per-guild store) is the active-worlds message id (so it's edited in place instead of
-duplicated) and a `since` cursor for history (so a session is only posted once).
+duplicated), a `since` cursor for history (so a session is only posted once), and a map of
+splasher username → thread id under the history channel (so each splasher's thread is created
+once and reused, rather than re-created on every poll).
 
 ## Prerequisites
 

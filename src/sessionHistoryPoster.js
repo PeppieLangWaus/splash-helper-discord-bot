@@ -1,18 +1,19 @@
-const { ContainerBuilder, MessageFlags } = require("discord.js");
+const { ContainerBuilder, MessageFlags, ThreadAutoArchiveDuration } = require("discord.js");
 const store = require("./store");
 const backendApi = require("./backendApi");
 
 const POLL_INTERVAL_MS = 30 * 1000;
+const THREAD_NAME_MAX_LENGTH = 100;
 
 function buildSessionHistoryContainer(entry) {
-  const { username, session } = entry;
+  const { session } = entry;
   const xpGained = session.currentMagicXp - session.startMagicXp;
   const finalizedSeconds = Math.floor(entry.finalizedTimestamp / 1000);
 
   return new ContainerBuilder()
     .setAccentColor(0x1abc9c)
     .addTextDisplayComponents((textDisplay) =>
-      textDisplay.setContent(`## Archived session — ${username}\n<t:${finalizedSeconds}:f>`)
+      textDisplay.setContent(`## Archived session\n<t:${finalizedSeconds}:f>`)
     )
     .addSeparatorComponents((separator) => separator)
     .addTextDisplayComponents((textDisplay) =>
@@ -26,6 +27,30 @@ function buildSessionHistoryContainer(entry) {
           `**Sticky Knight:** ${session.stickyKnight ? "Yes" : "No"}`
       )
     );
+}
+
+/** Finds this guild's history thread for a splasher, creating it under the configured history
+ *  channel the first time we see that username. Thread ids are cached on guildConfig.historyThreads
+ *  (persisted to the store) so later polls reuse the same thread instead of creating a new one —
+ *  sending to an archived thread un-archives it automatically, so no extra bookkeeping is needed. */
+async function getOrCreateSplasherThread(channel, guildId, guildConfig, username) {
+  const existingThreadId = guildConfig.historyThreads?.[username];
+  if (existingThreadId) {
+    const existing = await channel.client.channels.fetch(existingThreadId).catch(() => null);
+    if (existing?.isThread()) return existing;
+  }
+
+  const thread = await channel.threads.create({
+    name: username.slice(0, THREAD_NAME_MAX_LENGTH),
+    autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+    reason: `Session history thread for ${username}`,
+  });
+
+  const historyThreads = { ...(guildConfig.historyThreads ?? {}), [username]: thread.id };
+  guildConfig.historyThreads = historyThreads;
+  store.patchGuild(guildId, { historyThreads });
+
+  return thread;
 }
 
 async function postGuildHistory(client, guildId, guildConfig, discordConfig) {
@@ -42,10 +67,16 @@ async function postGuildHistory(client, guildId, guildConfig, discordConfig) {
   // Sent strictly in order, and the cursor only advances past entries that were actually
   // posted — a failure stops the batch so the next poll retries from the right place instead
   // of skipping the entry that failed.
+  const threadCache = new Map();
   let latestFinalized = since;
   for (const entry of result.sessions) {
     try {
-      await channel.send({
+      let thread = threadCache.get(entry.username);
+      if (!thread) {
+        thread = await getOrCreateSplasherThread(channel, guildId, guildConfig, entry.username);
+        threadCache.set(entry.username, thread);
+      }
+      await thread.send({
         components: [buildSessionHistoryContainer(entry)],
         flags: MessageFlags.IsComponentsV2,
       });
@@ -67,12 +98,21 @@ async function pollGuild(client, guildId, guildConfig) {
 }
 
 function startSessionHistoryPoster(client) {
+  // Per-guild thread creation can be slow (thread creation is rate-limited), so a single poll
+  // can outlast POLL_INTERVAL_MS. Without this guard, an overlapping tick would re-fetch and
+  // re-post the same batch before lastHistorySyncAt from the first run had been persisted.
+  const inFlightGuildIds = new Set();
+
   const tick = () => {
     const guilds = store.allGuilds();
     for (const [guildId, guildConfig] of Object.entries(guilds)) {
-      pollGuild(client, guildId, guildConfig).catch((error) => {
-        console.error(`Session history poll failed for guild ${guildId}:`, error);
-      });
+      if (inFlightGuildIds.has(guildId)) continue;
+      inFlightGuildIds.add(guildId);
+      pollGuild(client, guildId, guildConfig)
+        .catch((error) => {
+          console.error(`Session history poll failed for guild ${guildId}:`, error);
+        })
+        .finally(() => inFlightGuildIds.delete(guildId));
     }
   };
 
