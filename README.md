@@ -85,6 +85,33 @@ once and reused, rather than re-created on every poll).
    npm start
    ```
 
+## Deployment (Docker / Coolify)
+
+The repo includes a `Dockerfile` and `docker-compose.yml` so it can be deployed as a Docker
+Compose (or plain Dockerfile) resource in Coolify:
+
+1. In Coolify, create a new resource pointing at this repo, build pack **Docker Compose**
+   (or **Dockerfile** if you'd rather not use the compose file).
+2. Set the environment variables from `.env.example` (`DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`,
+   `BACKEND_BASE_URL`) in Coolify's environment variables UI — do not commit `.env`.
+3. Leave `BOT_STORE_PATH` unset in Coolify; the image sets it to `/app/data/guilds.json` and
+   `docker-compose.yml` mounts a named volume at `/app/data` so the per-guild store survives
+   redeploys.
+4. This is a gateway bot with no HTTP server/port to expose — don't configure a domain/port for it.
+5. Slash commands still need to be registered at least once. Either run
+   `npm run register-commands` locally against the same `CLIENT_ID`/`GUILD_ID`, or run it once
+   inside the deployed container from Coolify's terminal:
+
+   ```bash
+   node src/register-commands.js
+   ```
+
+To build and run locally with Docker instead of Coolify:
+
+```bash
+docker compose up --build
+```
+
 ## Notes
 
 - Keep `.env` private. It is ignored by git through `.gitignore`.
