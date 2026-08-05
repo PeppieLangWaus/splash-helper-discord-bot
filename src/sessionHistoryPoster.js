@@ -1,33 +1,10 @@
-const { ContainerBuilder, MessageFlags, ThreadAutoArchiveDuration } = require("discord.js");
+const { MessageFlags, ThreadAutoArchiveDuration } = require("discord.js");
 const store = require("./store");
 const backendApi = require("./backendApi");
+const sessionLogDisplay = require("./display-components/session-log");
 
 const POLL_INTERVAL_MS = 30 * 1000;
 const THREAD_NAME_MAX_LENGTH = 100;
-
-function buildSessionHistoryContainer(entry) {
-  const { session } = entry;
-  const xpGained = session.currentMagicXp - session.startMagicXp;
-  const finalizedSeconds = Math.floor(entry.finalizedTimestamp / 1000);
-
-  return new ContainerBuilder()
-    .setAccentColor(0x1abc9c)
-    .addTextDisplayComponents((textDisplay) =>
-      textDisplay.setContent(`## Archived session\n<t:${finalizedSeconds}:f>`)
-    )
-    .addSeparatorComponents((separator) => separator)
-    .addTextDisplayComponents((textDisplay) =>
-      textDisplay.setContent(
-        `**World:** ${session.world}\n` +
-          `**Spell:** ${session.spell}\n` +
-          `**Spells cast:** ${session.spellsCast.toLocaleString()}\n` +
-          `**Magic XP gained:** ${xpGained.toLocaleString()}\n` +
-          `**Rune cost:** ${session.runeCostGp.toLocaleString()} gp\n` +
-          `**Avg players:** ${session.averagePlayerCount.toFixed(1)}\n` +
-          `**Sticky Knight:** ${session.stickyKnight ? "Yes" : "No"}`
-      )
-    );
-}
 
 /** Finds this guild's history thread for a splasher, creating it under the configured history
  *  channel the first time we see that username. Thread ids are cached on guildConfig.historyThreads
@@ -77,7 +54,7 @@ async function postGuildHistory(client, guildId, guildConfig, discordConfig) {
         threadCache.set(entry.username, thread);
       }
       await thread.send({
-        components: [buildSessionHistoryContainer(entry)],
+        components: [sessionLogDisplay.buildComponent(entry)],
         flags: MessageFlags.IsComponentsV2,
       });
     } catch (error) {
@@ -120,4 +97,4 @@ function startSessionHistoryPoster(client) {
   setInterval(tick, POLL_INTERVAL_MS);
 }
 
-module.exports = { startSessionHistoryPoster, buildSessionHistoryContainer };
+module.exports = { startSessionHistoryPoster };
