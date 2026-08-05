@@ -1,0 +1,15 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      CLIENT_ID: ${CLIENT_ID}
+      GUILD_ID: ${GUILD_ID}
+      BACKEND_BASE_URL: ${BACKEND_BASE_URL}
+      BOT_STORE_PATH: /app/data/guilds.json
+    volumes:
+      - bot-data:/app/data
+
+volumes:
+  bot-data:
